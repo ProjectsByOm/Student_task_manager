@@ -1,0 +1,17 @@
+services:
+  daybook:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_PATH: /data/daybook.db
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - daybook-data:/data
+
+volumes:
+  daybook-data:

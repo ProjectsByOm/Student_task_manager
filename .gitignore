@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+daybook.db
+daybook.db-shm
+daybook.db-wal
+coverage/
