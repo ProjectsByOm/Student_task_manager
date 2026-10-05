@@ -177,9 +177,71 @@ test("authentication, account isolation, imports, reset tokens, admin roles, and
   });
   assert.equal(login.status, 200);
   assert.equal(login.body.user.role, "admin");
+
+  const proxiedLogin = await request("/api/auth/login", {
+    method: "POST",
+    body: { email: "student@daybook.test", password: "replacement-password" },
+    headers: {
+      Origin: "https://tasks.daybook.example",
+      "X-Forwarded-Proto": "https",
+      "X-Forwarded-Host": "tasks.daybook.example"
+    }
+  });
+  assert.equal(proxiedLogin.status, 200);
+
   assert.equal((await request("/api/auth/login", {
     method: "POST",
     body: { email: "student@daybook.test", password: "replacement-password" },
     headers: { Origin: "https://attacker.example" }
   })).status, 403);
+});
+
+test("production startup does not require SMTP and reports unavailable password reset", async () => {
+  const port = await availablePort();
+  const productionUrl = `http://127.0.0.1:${port}`;
+  const productionServer = spawn(process.execPath, [path.join(__dirname, "..", "server.js")], {
+    cwd: path.join(__dirname, ".."),
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      PORT: String(port),
+      DATABASE_PATH: path.join(tempDirectory, "production.db"),
+      JWT_SECRET: "production-integration-test-secret-long-enough",
+      ADMIN_EMAIL: "admin@production.test",
+      APP_URL: "https://daybook.example",
+      SMTP_HOST: "",
+      SMTP_FROM: ""
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  try {
+    let lastError;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (productionServer.exitCode !== null) {
+        throw new Error(`Production test server exited early: ${lastError || productionServer.exitCode}`);
+      }
+      try {
+        const response = await fetch(`${productionUrl}/api/health`);
+        if (response.ok) break;
+      } catch (error) {
+        lastError = error.message;
+      }
+      if (attempt === 79) throw new Error(`Production test server did not become ready: ${lastError}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const response = await fetch(`${productionUrl}/api/auth/forgot`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "admin@production.test" })
+    });
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /not configured/i);
+  } finally {
+    if (productionServer.exitCode === null) {
+      productionServer.kill();
+      await once(productionServer, "exit");
+    }
+  }
 });

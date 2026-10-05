@@ -26,8 +26,8 @@ if (!JWT_SECRET) {
   throw new Error("JWT_SECRET must be set in production.");
 }
 
-if (process.env.NODE_ENV === "production" && (!process.env.ADMIN_EMAIL || !process.env.SMTP_HOST || !process.env.SMTP_FROM)) {
-  throw new Error("ADMIN_EMAIL, SMTP_HOST, and SMTP_FROM must be set in production.");
+if (process.env.NODE_ENV === "production" && !process.env.ADMIN_EMAIL) {
+  throw new Error("ADMIN_EMAIL must be set in production.");
 }
 if (process.env.NODE_ENV === "production" && JWT_SECRET.length < 32) {
   throw new Error("JWT_SECRET must contain at least 32 characters in production.");
@@ -75,12 +75,38 @@ app.use(helmet({
 app.disable("x-powered-by");
 app.set("trust proxy", TRUST_PROXY_HOPS);
 
+function resolveAllowedOrigins(req) {
+  const host = req.get("host") || "";
+  const protocol = req.protocol || "http";
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  const origins = new Set();
+
+  if (host) {
+    origins.add(`${protocol}://${host}`);
+  }
+  if (forwardedHost) {
+    origins.add(`${forwardedProto || protocol}://${forwardedHost}`);
+  }
+
+  try {
+    if (process.env.APP_URL) {
+      origins.add(new URL(process.env.APP_URL).origin);
+    }
+  } catch (error) {
+    // Ignore invalid APP_URL values; production validation already enforces a valid URL.
+  }
+
+  return [...origins].filter(Boolean);
+}
+
 function requireSameOrigin(req, res, next) {
   const origin = req.get("origin");
   if (!origin) return next();
   try {
-    const expectedOrigin = `${req.protocol}://${req.get("host")}`;
-    if (new URL(origin).origin !== expectedOrigin) {
+    const requestOrigin = new URL(origin).origin;
+    const allowedOrigins = resolveAllowedOrigins(req);
+    if (!allowedOrigins.includes(requestOrigin)) {
       return res.status(403).json({ error: "Cross-origin request blocked." });
     }
     return next();
@@ -463,6 +489,10 @@ app.post("/api/auth/forgot", requireSameOrigin, resetLimiter, async (req, res) =
     if (normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return res.status(400).json({ error: "Enter a valid email address." });
     }
+    const smtpHost = process.env.SMTP_HOST;
+    if (process.env.NODE_ENV === "production" && !smtpHost) {
+      return res.status(503).json({ error: "Password reset email is not configured on this host." });
+    }
     const user = await getRow('SELECT * FROM users WHERE email = ?', [normalizedEmail]);
 
     const token = crypto.randomBytes(32).toString("hex");
@@ -477,7 +507,6 @@ app.post("/api/auth/forgot", requireSameOrigin, resetLimiter, async (req, res) =
     const appUrl = String(process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
     const resetLink = `${appUrl}/#reset=${token}`;
 
-    const smtpHost = process.env.SMTP_HOST;
     if (smtpHost && user) {
       try {
         const transporter = nodemailer.createTransport({

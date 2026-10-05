@@ -10,7 +10,7 @@ Daybook requires Node.js 20 or newer. Production startup requires these environm
 - `DATABASE_PATH` (a writable path on persistent storage)
 - `ADMIN_EMAIL` (the email address that should receive the initial administrator role)
 - `APP_URL` (the public HTTPS URL, without a trailing slash)
-- `SMTP_HOST`, `SMTP_FROM` (required to deliver password-reset links)
+- `SMTP_HOST`, `SMTP_FROM` (optional; required to deliver password-reset links)
 - `SMTP_PORT` (usually `587`; optional, defaults to `587`)
 - `SMTP_USER`, `SMTP_PASS` (optional, if the SMTP provider requires authentication)
 - `SMTP_SECURE=true` (optional, for implicit TLS, usually port `465`)
@@ -19,6 +19,19 @@ Daybook requires Node.js 20 or newer. Production startup requires these environm
 Copy `.env.example` to a local, untracked `.env` file and fill in real values. Use your hosting provider's secret manager for production values. Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
 
 The user matching `ADMIN_EMAIL` is promoted to administrator on signup. If that account already exists, it is promoted at startup. Public signup never grants administrator access to any other email. Administrators can review users and change roles from the in-app Admin panel.
+
+## Host from this Windows PC with Cloudflared
+
+For a temporary public URL, install Node.js 20+ and Cloudflared, open PowerShell in the project folder, and run:
+
+```powershell
+npm install
+npm run host
+```
+
+On first launch, enter the email address for the initial administrator account. The launcher saves that address and a generated signing secret in the ignored `.env` file, opens a Cloudflare Quick Tunnel, then starts the website in production mode using the tunnel's HTTPS URL. Keep the terminal open while people use the site; press Ctrl+C to stop hosting. The `trycloudflare.com` address is temporary and can change after a restart. Your PC must stay powered on and connected to the internet.
+
+Quick Tunnels are suitable for trying out the site, not reliable permanent hosting. For a stable address, create a named Cloudflare Tunnel for a domain in your Cloudflare account and set `APP_URL` to that domain. Keep SQLite data on persistent storage. Password reset requires SMTP settings; without them, the reset request reports that email delivery is not configured.
 
 ## Docker
 
@@ -69,7 +82,7 @@ The included `Procfile` starts the server with `node server.js`. Configure all p
 - Create the account matching `ADMIN_EMAIL` and confirm the Admin button is visible.
 - Configure SMTP and use the forgot-password flow with a real inbox.
 - Confirm the database path is on persistent storage and backups are enabled.
-- Verify the deployment uses HTTPS, `NODE_ENV=production`, a strong `JWT_SECRET`, and the correct `TRUST_PROXY_HOPS` value when applicable.
+- Verify the deployment uses HTTPS, `NODE_ENV=production`, a strong `JWT_SECRET`, and the correct `TRUST_PROXY_HOPS` value when applicable (set it to `1` for a single Cloudflared or nginx proxy hop).
 - Keep dependencies updated and review platform logs for startup and SMTP errors.
 
 ## Data and operations
